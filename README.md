@@ -129,6 +129,8 @@ Select backend via env var:
 - **SIMILARITY_BACKEND=faiss** — HNSW, best raw speed
 - **SIMILARITY_BACKEND=ivf** — IVF, best recall among ANN options
 
+**Note on Annoy:** Annoy was evaluated as a third candidate but has an unresolved segfault on Apple Silicon (ARM64) across all Python versions — a known open issue in the library ([github.com/spotify/annoy](https://github.com/spotify/annoy/issues)). It was not implemented for that reason. Theoretically, Annoy would be slower than HNSW at the same recall target — as shown in ANN-Benchmarks (Aumüller et al., 2020, [arXiv:1807.05614](https://arxiv.org/abs/1807.05614)) — making HNSW the better choice regardless.
+
 See PART3_VECTOR_SEARCH for algorithm details, parameter tuning, and trade-off analysis.
 
 

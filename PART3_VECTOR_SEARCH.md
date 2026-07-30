@@ -67,10 +67,9 @@ Both algorithms typically achieve >95% recall. Here HNSW is ~0.78 and IVF is ~0.
 
 **Reference**: Bernhardsson (2013). *Annoy: Approximate Nearest Neighbors in C++/Python.* [github.com/spotify/annoy](https://github.com/spotify/annoy). Benchmark: Aumüller et al. (2020). *ANN-Benchmarks.* [arXiv:1807.05614](https://arxiv.org/abs/1807.05614)
 
-Annoy (tree-based) was not implemented because: (1) its recall/speed trade-off at a given memory budget is generally worse than HNSW's per ANN-Benchmarks, and (2) like IVF, it requires a full rebuild for every insert — making it impractical for a live catalog. HNSW and IVF cover the speed/recall trade-off space more usefully for this use case.
+Annoy (tree-based) was not implemented because:
+- Its recall/speed trade-off at a given memory budget is generally worse than HNSW's per ANN-Benchmarks.
+- Like IVF, it requires a full rebuild for every insert — making it impractical for a live catalog.
 
----
+HNSW and IVF cover the speed/recall trade-off space more usefully for this use case.
 
-## Default Backend: Brute-force
-
-Both ANN backends are approximate. For 30k products, brute-force is exact and already fast — no reason to trade correctness for speed at this scale. The ANN backends are opt-in via the SIMILARITY_BACKEND environment variable.
