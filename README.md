@@ -199,7 +199,17 @@ for speed until the catalog actually grows).
 
 
 
+## Expected Output & Results
+
+The API returns a ranked list of similar product IDs. Below is a sample response from Bruno for `product_id=26d41bdc1495de290bc8e6062d927729&num_similar=5`:
+
+![API Output](docs/Output.png)
+
+**200 OK** — 5 similar product IDs returned in ~233ms (brute-force backend, cold start included).
+
+---
+
 ## For more details - Kindly refer
 DESIGN.md          
-PART3_VECTOR_SEARCH.md  
+PART3_VECTOR_SEARCH.md
 
