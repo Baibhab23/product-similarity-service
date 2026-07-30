@@ -1,4 +1,4 @@
-# Part 3 — ANN Vector Search: HNSW vs IVF
+# Vector Similarity Search: Comparative Analysis of ANN Algorithms
 
 ## The Problem
 
@@ -72,4 +72,19 @@ Annoy (tree-based) was not implemented because:
 - Like IVF, it requires a full rebuild for every insert — making it impractical for a live catalog.
 
 HNSW and IVF cover the speed/recall trade-off space more usefully for this use case.
+
+---
+
+## Conclusion
+
+Based on the benchmark results and algorithmic trade-offs:
+
+**FAISS IVF is the recommended ANN backend for this use case.** It achieves a recall value of 0.93 — significantly better than HNSW's 0.78 — at only ~1.5x the query latency (0.56ms vs 0.36ms). Both are ~55x faster than brute-force, so the latency difference between them is negligible in practice. The higher recall means users get more relevant recommendations, which matters more than shaving 0.2ms off each query.
+
+**FAISS HNSW is the better choice if:**
+- The catalog grows continuously with frequent inserts (no retraining needed)
+- Raw query throughput under extreme load is the primary constraint
+- The dataset is large enough that IVF's training pass becomes expensive
+
+**Brute-force remains the default** because at 30k products it is exact, fast enough (20ms), and requires no index build cost. The ANN backends are opt-in for when the catalog scales to a point where brute-force latency becomes a bottleneck.
 
