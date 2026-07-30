@@ -32,8 +32,7 @@ python scripts/build_index.py --num-queries 300 --k 10
 
 ## Part 1 — **find_similar_products**
 
-app/similarity.py (logic) + app/features.py (shared feature engineering,
-also used by Part 3) + app/data_loader.py (loading/cleaning).
+The similarity logic, shared feature engineering, and dataset loading/cleaning modules.
 
 ### The dataset is messier than the exercise spec suggests
 
@@ -97,8 +96,6 @@ in Part 3.
 
 ## Part 2 — FastAPI microservice
 
-app/main.py.
-
 ```
 GET /find_similar_products?product_id=<id>&num_similar=<n>   -> ["id1", "id2", ...]
 GET /health                                                    -> {"status": "ok", ...}
@@ -117,63 +114,23 @@ GET /health                                                    -> {"status": "ok
 
 ## Part 3 (bonus) — vector search for scale
 
-app/vector_index.py. Algorithm: **HNSW** (Hierarchical Navigable Small
-World graphs), via faiss.IndexHNSWFlat.
+Two ANN backends implemented and benchmarked: **HNSW** and **IVF**, both via FAISS.
 
-> Malkov, Y. A., & Yashunin, D. A. (2016/2018). *Efficient and robust
-> approximate nearest neighbor search using Hierarchical Navigable Small
-> World graphs.* IEEE TPAMI. [arXiv:1603.09320](https://arxiv.org/abs/1603.09320)
+| Backend | Build time | Mean latency | p95 latency | Recall@10 |
+|---|---|---|---|---|
+| Brute-force | 0.06s | 20.6ms | 26.7ms | 1.00 (exact) |
+| FAISS HNSW | 1.40s | 0.36ms | 0.60ms | 0.78 |
+| FAISS IVF | 0.21s | 0.56ms | 0.77ms | 0.93 |
 
-**Why HNSW over IVF or Annoy:**
+HNSW is fastest; IVF has better recall at ~1.5x the latency. Both are ~55x faster than brute-force per query.
 
-- Brute-force is already O(n*d) — at 30k rows that's ~54ms, fine for an
-  interactive API. The exercise asks to optimize for datasets 100-1000x
-  larger, where a full scan per request stops being viable at either
-  latency or CPU-cost-per-request.
-- HNSW gives sub-linear query time with high recall and, unlike IVF,
-  needs no training/clustering pass over the data distribution — it's
-  built incrementally, which matters for a catalog that keeps getting new
-  products. IVF (+ product quantization) is more memory-efficient at very
-  large scale (100M+ vectors), which isn't the constraint here.
-- Annoy (tree-based) is simpler to ship, but its recall/speed trade-off
-  at a given memory budget is generally worse than HNSW's, and it needs a
-  full rebuild for inserts rather than supporting them incrementally.
-- Cosine similarity is preserved by L2-normalizing vectors and searching
-  with inner product (METRIC_INNER_PRODUCT) — same notion of
-  "similar" as Part 1, computed approximately instead of exhaustively, and
-  built from the *same* feature vectors (app/features.py) so results
-  are directly comparable.
+Select backend via env var:
+- **SIMILARITY_BACKEND=brute** (default) — exact, no build cost
+- **SIMILARITY_BACKEND=faiss** — HNSW, best raw speed
+- **SIMILARITY_BACKEND=ivf** — IVF, best recall among ANN options
 
-**Measured** (scripts/build_index.py, 300 random queries, k=10, this
-30k-row dataset, default efSearch=64):
+See PART3_VECTOR_SEARCH for algorithm details, parameter tuning, and trade-off analysis.
 
-| Backend | mean latency | p95 latency |
-|---|---|---|
-| Brute-force (Part 1) | 54.9ms | 61.7ms |
-| FAISS HNSW (Part 3) | 0.9ms | 1.5ms |
-
-~60x faster per query. Index build time is the trade-off: 1.5s
-(brute-force, no real "build" needed) vs. ~10s (HNSW graph construction) —
-amortized once at startup, worth it once query volume is high.
-
-**Recall caveat, measured honestly:** recall@10 against the brute-force
-ground truth is ~0.77-0.80, not the >95% HNSW is usually capable of.
-Investigating why: 42% of products in this dataset (12,500/30,000) share
-an *exact-duplicate* feature vector with at least one other product — a
-direct consequence of how sparse the source data is (missing brand/colour/
-price/weight all collapse to the same imputed defaults). For those
-products there are many genuinely-tied nearest neighbors, and brute-force
-only wins the "ground truth" comparison because it applies a rating/price
-tie-break that isn't part of the vector FAISS searches over — both answers
-are valid, they just don't agree on *which* tied member to return. This is
-a data-sparsity artifact, not evidence that HNSW's approximation is poor;
-efSearch can be tuned up (128, 256 — tested, recall improves to ~0.80-0.82)
-at a small latency cost via FAISS_HNSW_EF_SEARCH if exact tie agreement
-with the brute-force backend matters for a given use case.
-
-**Usage:** opt-in via SIMILARITY_BACKEND=faiss (default is brute, exact,
-and already fast enough for this dataset — no reason to trade correctness
-for speed until the catalog actually grows).
 
 ---
 
@@ -201,7 +158,7 @@ for speed until the catalog actually grows).
 
 ## Expected Output & Results
 
-The API returns a ranked list of similar product IDs. Below is a sample response from Bruno for `product_id=26d41bdc1495de290bc8e6062d927729&num_similar=5`:
+The API returns a ranked list of similar product IDs. Below is a sample response from Bruno for **product_id=26d41bdc1495de290bc8e6062d927729&num_similar=5**:
 
 ![API Output](docs/Output.png)
 

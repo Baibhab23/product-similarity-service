@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 # So the rest of the app doesn't need to know which one is active.
 if settings.SIMILARITY_BACKEND == "faiss":
     from app import vector_index as backend
+elif settings.SIMILARITY_BACKEND == "ivf":
+    from app import ivf_index as backend
 else:
     from app import similarity as backend
 
