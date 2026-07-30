@@ -1,0 +1,12 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+venv
+tests
+k8s
+scripts
+README.md
+data/*.ldjson
