@@ -2,6 +2,10 @@
 data/*.ldjson
 data/*.json
 
+# Image vectors & Chroma DB (built locally, not committed)
+data/image_cache/
+data/chroma/
+
 requirements.txt
 
 # Python

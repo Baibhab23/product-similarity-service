@@ -21,7 +21,11 @@ EXPOSE 8000
 
 ENV NAME=ProductSimilarityApp \
     PYTHONUNBUFFERED=1 \
-    SIMILARITY_BACKEND=brute
+    SIMILARITY_BACKEND=brute \
+    IMAGE_ENABLED=false \
+    CHROMA_PATH=/app/data/chroma \
+    CHROMA_COLLECTION=product_images \
+    RRF_K=60
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)" || exit 1

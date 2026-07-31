@@ -66,4 +66,45 @@ The brute-force backend was exact and fast enough for 30k products. The FAISS ba
 
 ### Docker
 
-The dataset zip is bundled inside the Docker image and extracted on first startup. This keeps the image smaller than copying the raw 74MB file directly.
+The dataset archive is bundled inside the Docker image and extracted on first startup. This keeps the image smaller than copying the raw extracted file directly.
+
+---
+
+## Part 4 — Image-Based Similarity
+
+### Why ChromaDB
+
+I considered three options for storing image embeddings:
+
+- **Flat matrix file** — simple, but no upsert by ID and requires loading the full matrix into memory at serve time.
+- **FAISS index persisted to disk** — already a dependency, but still no per-ID upsert and not a true vector DB.
+- **ChromaDB (embedded)** — persistent, supports upsert by product ID, handles ANN search internally, and requires no separate server process.
+
+ChromaDB won because it makes future catalog updates cheap (upsert individual products rather than rebuild the full matrix) and keeps memory use flat at serve time.
+
+### Offline Build, Not Startup Inference
+
+Downloading and embedding 30k images at server startup would block traffic for 45+ minutes. The build step runs once offline and stores vectors in the Chroma collection. The server just opens the collection on startup — no HTTP requests, no model inference.
+
+The build is resumable: products already in the collection are skipped on re-run, so an interrupted build can be continued without re-processing completed work.
+
+### MobileNetV3-Small
+
+EfficientNet-B0 was the first choice (standard, well-known), but CPU inference was the bottleneck at ~10 products/s. MobileNetV3-Small is ~3× faster on CPU, produces 576-dim embeddings (vs. 1280), and provides comparable visual feature quality for product thumbnail images. The smaller embedding dimension also reduces storage and query latency.
+
+### Pipelined Download + Inference
+
+The build pipelines downloads and inference: while the model runs on the current batch, the next batch's images are already being downloaded in parallel using a thread pool. This hides most of the network latency and nearly doubles throughput compared to sequential download → infer → download → infer.
+
+### RRF Fusion
+
+When image similarity is enabled, two ranked lists are produced per query:
+1. Structured similarity (cosine over brand/colour/price/weight/rating features)
+2. Visual similarity (Chroma ANN search over MobileNet embeddings)
+
+These are merged with **Reciprocal Rank Fusion**: each product's score is the sum of 1 / (k + rank) across both lists. RRF was chosen over weighted score blending because it requires no score normalization across two systems with different distance scales. The RRF constant (default 60) controls how aggressively high ranks are rewarded and is tunable via environment variable.
+
+### Fallback Behaviour
+
+- Products with dead image URLs or failed downloads get a zero vector. They don't affect the visual ranking but remain reachable via the structured backend.
+- If image similarity is enabled and the Chroma collection was never built, the server logs a warning and continues with structured-only results rather than crashing.

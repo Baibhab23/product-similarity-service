@@ -1,7 +1,7 @@
 # Product Similarity Service
 
 Finds similar products in the Amazon Fashion dataset by brand, colour,
-sales_price, weight, and rating. Built for the SAP CXII technical
+sales_price, weight, rating, and visual appearance. Built for the SAP CXII technical
 exercise.
 
 ## Quickstart
@@ -10,7 +10,7 @@ exercise.
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# data/archive.zip is bundled; the app auto-extracts it on first run.
+# The dataset archive is bundled; the app auto-extracts it on first run.
 uvicorn app.main:app --reload
 # -> http://localhost:8000/find_similar_products?product_id=<id>&num_similar=5
 ```
@@ -42,7 +42,7 @@ Before picking a similarity measure, the fields had to be cleaned:
 |---|---|---|
 | weight | Free text ("200 g", "1.2 kg"); **79%** of rows use a 999999999 sentinel for "unknown" | Parsed to grams with unit conversion; sentinel and unparsable text → NaN |
 | sales_price | Missing on ~10% of rows | Coerced to float; missing → NaN |
-| brand | Missing on ~27%; thousands of distinct values | Missing → "UNKNOWN"; long tail capped to top-N (MAX_CATEGORY_VALUES, default 200) → "OTHER" |
+| brand | Missing on ~27%; thousands of distinct values | Missing → "UNKNOWN"; long tail capped to top-N (default 200) → "OTHER" |
 | colour | Missing on ~80% (only ~6k/30k rows have it) | Same treatment as brand |
 | rating | Clean — always present, always numeric | Used as-is |
 
@@ -101,14 +101,13 @@ GET /find_similar_products?product_id=<id>&num_similar=<n>   -> ["id1", "id2", .
 GET /health                                                    -> {"status": "ok", ...}
 ```
 
-- num_similar is validated (1 <= num_similar <= MAX_NUM_SIMILAR, default
-  cap 100) → 422 if out of range.
+- num_similar is validated (1 <= num_similar <= 100) → 422 if out of range.
 - Unknown product_id → 404, not a generic exception.
 - Unexpected errors → 500, logged server-side, without leaking internals
   in the response.
-- The index is built once at process startup (lifespan), not lazily on
+- The index is built once at process startup, not lazily on
   first request — so the first real request isn't slow.
-- docker run's HEALTHCHECK targets /health.
+- The Docker health check targets /health.
 
 ---
 
@@ -133,30 +132,85 @@ Select backend via env var:
 
 See ANN_ALGORITHM_ANALYSIS for algorithm details, parameter tuning, and trade-off analysis.
 
+---
+
+## Part 4 (bonus) — image-based similarity
+
+Visual embeddings extracted from product images are stored in a persistent
+**ChromaDB** collection. At query time, Chroma returns visually similar products
+which are merged with the structured-feature results using **Reciprocal Rank
+Fusion (RRF)**. Disabled by default — opt in with IMAGE_ENABLED=true.
+
+### How it works
+
+1. A one-time offline build script downloads product images, runs them through
+   **MobileNetV3-Small** (576-dim embeddings), and upserts into the Chroma
+   collection in batches. Resumable — already-stored products are skipped on re-run.
+2. At serve time, each query fires two searches:
+   - Structured backend (brute/FAISS/IVF) → ranked list by cosine similarity
+   - Chroma → ranked list by visual similarity
+3. RRF merges both lists into a final ranking. Products appearing high in both
+   lists rank highest; products missing an image fall back gracefully to the
+   structured score.
+
+### Setup
+
+```bash
+# Step 1 — build the Chroma collection (one-time, ~45 min for 30k products)
+python scripts/build_image_vectors.py
+
+# Step 2 — start the server with image similarity enabled
+IMAGE_ENABLED=true uvicorn app.main:app --reload
+```
+
+Docker (Chroma collection is baked into the image):
+
+```bash
+docker build -t product-similarity .
+docker run -e IMAGE_ENABLED=true -p 8000:8000 product-similarity
+```
+
+### Configuration
+
+| Env var | Default | Description |
+|---|---|---|
+| IMAGE_ENABLED | false | Enable image similarity + RRF fusion |
+| CHROMA_PATH | data/chroma | Path to persistent ChromaDB directory |
+| CHROMA_COLLECTION | product_images | Chroma collection name |
+| RRF_K | 60 | RRF rank-discounting constant (higher = less aggressive) |
+
+### Design decisions
+
+- **Offline build, not startup inference** — downloading and embedding 30k images
+  at server startup would block traffic for 45+ minutes. The build runs
+  once and persists vectors to Chroma; the server just opens the collection.
+- **ChromaDB over a flat matrix file** — supports upsert by product ID (no full
+  rebuild when products change), persistent across restarts, and handles the ANN
+  search itself. No full matrix held in memory at serve time.
+- **MobileNetV3-Small over EfficientNet-B0** — ~3× faster CPU inference (the
+  bottleneck for the offline build), 576-dim output vs. 1280-dim, comparable
+  visual feature quality for product images.
+- **RRF over weighted score blending** — no score normalization needed across two
+  different systems (cosine vs. Chroma's internal distance). RRF is robust to
+  scale differences and doesn't require tuning a weight parameter.
+- **Zero-fill for missing images** — products with dead URLs or failed downloads
+  get a zero vector. They don't contribute to visual similarity but remain
+  reachable via the structured backend.
 
 ---
 
 ## Other design decisions & trade-offs
 
-- **Data shipped as data/archive.zip, not the extracted 74MB ldjson** —
+- **Dataset archive bundled, not the extracted file** —
   keeps the Docker image and git repo smaller; extracted once, lazily, on
-  first run (see data_loader._ensure_data_file_present).
+  first run.
 - **In-memory index only** — no persistence of the fitted feature matrix
   or FAISS index to disk. Fine for a single-node demo.
-- **No image-based or text-embedding similarity** — the exercise's
-  suggested attribute set (brand, colour, price, weight, rating) is
-  entirely structured/tabular, so it didn't justify pulling in a CNN or
-  transformer just to say the box was checked. Documented as a next step,
-  not implemented, in the interest of the ~4-6h scope: product_name /
-  meta_keywords are free text and would need TF-IDF or sentence
-  embeddings; image_urls would need downloading + a pretrained CNN
-  (ResNet/EfficientNet) for a visual embedding, combined with the
-  structured score behind a configurable weight.
-- **num_similar capped at 100** (MAX_NUM_SIMILAR) — an unbounded value
+- **num_similar capped at 100** — an unbounded value
   is either meaningless (a "top-100000-similar" list isn't a
   recommendation) or a DoS vector (forcing a full O(n) sort per request).
 
-
+---
 
 ## Expected Output & Results
 
@@ -168,7 +222,6 @@ The API returns a ranked list of similar product IDs. Below is a sample response
 
 ---
 
-## For more details - Kindly refer
-DESIGN.md          
-ANN_ALGORITHM_ANALYSIS.md
+## For more details
 
+See DESIGN.md and ANN_ALGORITHM_ANALYSIS.md.
