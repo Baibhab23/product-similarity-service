@@ -28,4 +28,10 @@ class Settings:
 
     MAX_NUM_SIMILAR = int(os.getenv("MAX_NUM_SIMILAR", "100"))
 
+    # Image-based similarity 
+    IMAGE_ENABLED = os.getenv("IMAGE_ENABLED", "false").lower() == "true"
+    CHROMA_PATH = os.getenv("CHROMA_PATH", "data/chroma")
+    CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "product_images")
+    RRF_K = int(os.getenv("RRF_K", "60"))
+
 settings = Settings()
