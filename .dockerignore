@@ -10,3 +10,4 @@ k8s
 scripts
 README.md
 data/*.ldjson
+data/image_cache/
